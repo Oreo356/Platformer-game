@@ -1,0 +1,430 @@
+ChatGPT Platform Game
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mini Platformer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-user-select: none;
+      user-select: none;
+      touch-action: manipulation;
+    }
+
+    body {
+      margin: 0;
+      background: #111;
+      overflow: hidden;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      color: white;
+    }
+
+    #gameContainer {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: linear-gradient(to top, #050505, #1a1a2e);
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-weight: 600;
+      text-shadow: 0 0 8px black;
+      pointer-events: none;
+    }
+
+    #message {
+      font-size: 16px;
+      margin-bottom: 4px;
+    }
+
+    #hint {
+      font-size: 13px;
+      opacity: 0.8;
+    }
+
+    #buttons {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      gap: 4px;
+      padding: 4px;
+      height: 80px;
+      box-sizing: border-box;
+    }
+
+    .btn {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: 700;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      color: #eee;
+    }
+
+    .btn:active {
+      background: rgba(255, 255, 255, 0.16);
+    }
+
+    #jumpBtn {
+      flex: 1.3;
+    }
+
+    @media (min-width: 800px) {
+      #hint {
+        display: block;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="gameContainer">
+    <canvas id="game"></canvas>
+
+    <div id="ui">
+      <div id="message">Tap or press SPACE to start!</div>
+      <div id="hint">Move: ← → or buttons • Jump: W / ↑ / SPACE or JUMP button</div>
+    </div>
+
+    <div id="buttons">
+      <div class="btn" id="leftBtn">◀</div>
+      <div class="btn" id="rightBtn">▶</div>
+      <div class="btn" id="jumpBtn">JUMP</div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+
+    const messageEl = document.getElementById("message");
+    const leftBtn = document.getElementById("leftBtn");
+    const rightBtn = document.getElementById("rightBtn");
+    const jumpBtn = document.getElementById("jumpBtn");
+
+    let w = canvas.width = window.innerWidth;
+    let h = canvas.height = window.innerHeight;
+
+    window.addEventListener("resize", () => {
+      w = canvas.width = window.innerWidth;
+      h = canvas.height = window.innerHeight;
+      resizeWorld();
+    });
+
+    // World setup
+    const world = {
+      width: 1400,
+      height: 800
+    };
+
+    function resizeWorld() {
+      // Nothing fancy for now, world stays same size; we just scale when drawing
+    }
+
+    const player = {
+      x: 80,
+      y: 0,
+      width: 40,
+      height: 50,
+      vx: 0,
+      vy: 0,
+      speed: 5,
+      jumpStrength: 14,
+      onGround: false
+    };
+
+    const gravity = 0.8;
+    const maxFallSpeed = 20;
+
+    // Simple platforms
+    let platforms = [];
+    const goal = {
+      x: 1250,
+      y: 220,
+      size: 40
+    };
+
+    function createLevel() {
+      platforms = [
+        { x: 0, y: 700, width: 500, height: 40 }, // ground start
+        { x: 450, y: 650, width: 250, height: 40 },
+        { x: 800, y: 600, width: 300, height: 40 },
+        { x: 250, y: 530, width: 220, height: 40 },
+        { x: 650, y: 470, width: 220, height: 40 },
+        { x: 1050, y: 520, width: 220, height: 40 },
+        { x: 350, y: 380, width: 200, height: 40 },
+        { x: 900, y: 340, width: 220, height: 40 },
+        { x: 1200, y: 260, width: 120, height: 40 } // near goal
+      ];
+    }
+
+    createLevel();
+
+    // Input
+    const keys = {
+      left: false,
+      right: false,
+      jump: false
+    };
+
+    function setButtonHold(btn, flagName) {
+      const down = (e) => {
+        e.preventDefault();
+        keys[flagName] = true;
+      };
+      const up = (e) => {
+        e.preventDefault();
+        keys[flagName] = false;
+      };
+
+      btn.addEventListener("touchstart", down);
+      btn.addEventListener("touchend", up);
+      btn.addEventListener("touchcancel", up);
+      btn.addEventListener("mousedown", down);
+      window.addEventListener("mouseup", up);
+    }
+
+    setButtonHold(leftBtn, "left");
+    setButtonHold(rightBtn, "right");
+
+    // Jump is a bit different: trigger jump on press
+    const jumpDown = (e) => {
+      e.preventDefault();
+      attemptJump();
+    };
+    jumpBtn.addEventListener("touchstart", jumpDown);
+    jumpBtn.addEventListener("mousedown", jumpDown);
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") keys.left = true;
+      if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") keys.right = true;
+      if (e.key === " " || e.key === "ArrowUp" || e.key === "w" || e.key === "W") {
+        attemptStart();
+        attemptJump();
+      }
+    });
+
+    window.addEventListener("keyup", (e) => {
+      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") keys.left = false;
+      if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") keys.right = false;
+    });
+
+    // Tap to start on screen
+    window.addEventListener("pointerdown", () => {
+      attemptStart();
+    });
+
+    let running = false;
+    let won = false;
+    let lastTime = 0;
+    let cameraX = 0;
+
+    function resetPlayer() {
+      player.x = 80;
+      player.y = 400;
+      player.vx = 0;
+      player.vy = 0;
+      player.onGround = false;
+      cameraX = 0;
+    }
+
+    function resetGame() {
+      won = false;
+      resetPlayer();
+      messageEl.textContent = "Reach the golden block!";
+    }
+
+    function attemptStart() {
+      if (!running) {
+        resetGame();
+        running = true;
+      } else if (won) {
+        resetGame();
+      }
+    }
+
+    function attemptJump() {
+      if (player.onGround) {
+        player.vy = -player.jumpStrength;
+        player.onGround = false;
+      }
+    }
+
+    function update(dt) {
+      if (!running) return;
+
+      // Horizontal movement
+      player.vx = 0;
+      if (keys.left) player.vx -= player.speed;
+      if (keys.right) player.vx += player.speed;
+
+      // Apply gravity
+      player.vy += gravity * dt;
+      if (player.vy > maxFallSpeed) player.vy = maxFallSpeed;
+
+      // Save previous position for collisions
+      const prevX = player.x;
+      const prevY = player.y;
+
+      // Move horizontally
+      player.x += player.vx * dt;
+
+      // Horizontal collision
+      for (let p of platforms) {
+        if (rectIntersect(player.x, player.y, player.width, player.height,
+          p.x, p.y, p.width, p.height)) {
+          if (player.vx > 0) {
+            player.x = p.x - player.width;
+          } else if (player.vx < 0) {
+            player.x = p.x + p.width;
+          }
+        }
+      }
+
+      // Move vertically
+      player.y += player.vy * dt;
+      player.onGround = false;
+
+      for (let p of platforms) {
+        if (rectIntersect(player.x, player.y, player.width, player.height,
+          p.x, p.y, p.width, p.height)) {
+
+          // Coming from above: land on platform
+          const wasAbove = prevY + player.height <= p.y;
+          const wasBelow = prevY >= p.y + p.height;
+
+          if (wasAbove && player.vy >= 0) {
+            player.y = p.y - player.height;
+            player.vy = 0;
+            player.onGround = true;
+          } else if (wasBelow && player.vy < 0) {
+            // Hitting underside
+            player.y = p.y + p.height;
+            player.vy = 0;
+          }
+        }
+      }
+
+      // World bounds
+      if (player.x < 0) player.x = 0;
+      if (player.x + player.width > world.width) player.x = world.width - player.width;
+
+      // Fall off bottom = reset
+      if (player.y > world.height + 200) {
+        resetPlayer();
+        messageEl.textContent = "You fell! Try again.";
+      }
+
+      // Check win
+      if (rectIntersect(player.x, player.y, player.width, player.height,
+        goal.x, goal.y, goal.size, goal.size)) {
+        running = false;
+        won = true;
+        messageEl.textContent = "You win! Tap or press SPACE to play again.";
+      }
+
+      // Camera follows player
+      const viewWidth = w;
+      const halfView = viewWidth / 2;
+      cameraX = player.x + player.width / 2 - halfView;
+      if (cameraX < 0) cameraX = 0;
+      if (cameraX > world.width - viewWidth) cameraX = Math.max(world.width - viewWidth, 0);
+    }
+
+    function rectIntersect(x1, y1, w1, h1, x2, y2, w2, h2) {
+      return !(
+        x1 + w1 <= x2 ||
+        x1 >= x2 + w2 ||
+        y1 + h1 <= y2 ||
+        y1 >= y2 + h2
+      );
+    }
+
+    function draw() {
+      // Clear
+      ctx.clearRect(0, 0, w, h);
+
+      // Background parallax-ish
+      ctx.save();
+      ctx.fillStyle = "#050812";
+      ctx.fillRect(0, 0, w, h);
+
+      // Simple stars
+      ctx.fillStyle = "rgba(255,255,255,0.15)";
+      for (let i = 0; i < 60; i++) {
+        const sx = (i * 100 - cameraX * 0.2) % (w + 200) - 100;
+        const sy = (i * 37) % h;
+        ctx.fillRect(sx, sy, 2, 2);
+      }
+
+      ctx.translate(-cameraX, 0);
+
+      // Platforms
+      for (let p of platforms) {
+        const gradient = ctx.createLinearGradient(p.x, p.y, p.x, p.y + p.height);
+        gradient.addColorStop(0, "#333");
+        gradient.addColorStop(1, "#111");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(p.x, p.y, p.width, p.height);
+
+        ctx.strokeStyle = "rgba(255,255,255,0.1)";
+        ctx.strokeRect(p.x, p.y, p.width, p.height);
+      }
+
+      // Goal
+      ctx.fillStyle = "#ffd54a";
+      ctx.fillRect(goal.x, goal.y, goal.size, goal.size);
+      ctx.strokeStyle = "#ffe97f";
+      ctx.strokeRect(goal.x, goal.y, goal.size, goal.size);
+
+      // Player
+      const gradientPlayer = ctx.createLinearGradient(player.x, player.y, player.x, player.y + player.height);
+      gradientPlayer.addColorStop(0, "#4dd0e1");
+      gradientPlayer.addColorStop(1, "#00838f");
+      ctx.fillStyle = gradientPlayer;
+      ctx.fillRect(player.x, player.y, player.width, player.height);
+
+      // Simple "eye"
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(player.x + player.width * 0.6, player.y + player.height * 0.25, 6, 6);
+
+      ctx.restore();
+    }
+
+    function loop(timestamp) {
+      const dt = (timestamp - lastTime) / 16.67 || 1; // ~frames
+      lastTime = timestamp;
+
+      update(dt);
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    // Init
+    resetGame();
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
